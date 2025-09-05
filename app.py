@@ -5,11 +5,23 @@ import re
 from datetime import datetime
 from tvDatafeed import TvDatafeed, Interval
 
-# --- Secrets (stored in secrets.toml) ---
-username = st.secrets["tradingview"]["username"]
-password = st.secrets["tradingview"]["password"]
+import streamlit as st
+from tvDatafeed import TvDatafeed, Interval
 
-tv = TvDatafeed(username=username, password=password)
+# User enters TradingView credentials
+username = st.text_input("Enter TradingView Username/Email")
+password = st.text_input("Enter TradingView Password", type="password")
+
+if st.button("Login"):
+    try:
+        tv = TvDatafeed(username, password)
+        st.success("✅ Logged in successfully!")
+        
+       
+        
+    except Exception as e:
+        st.error(f"❌ Login failed: {e}")
+
 
 # --- Streamlit UI ---
 st.title("📊 Stock Stochastic Trade Analyzer")
@@ -138,6 +150,7 @@ if st.button("Run Analysis"):
         st.download_button("📥 Download Results as Excel",
                            data=summary_df.to_excel(index=False, engine="openpyxl"),
                            file_name=f"stock_summary_{today}.xlsx")
+
 
 
 
