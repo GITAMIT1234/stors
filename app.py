@@ -7,8 +7,8 @@ from tvDatafeed import TvDatafeed, Interval
 from io import BytesIO
 
 # --- LOGIN SECTION ---
-username = st.text_input("Enter TradingView Username/Email")
-password = st.text_input("Enter TradingView Password", type="password")
+username = st.text_input("Enter Username/Email")
+password = st.text_input("Enter Password", type="password")
 
 if st.button("Login"):
     try:
@@ -158,3 +158,4 @@ if st.button("Run Analysis"):
                 file_name=f"stock_summary_{today}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
