@@ -7,8 +7,8 @@ from tvDatafeed import TvDatafeed, Interval
 from io import BytesIO
 
 # --- LOGIN SECTION ---
-username = st.text_input("Enter Username/Email")
-password = st.text_input("Enter Password", type="password")
+username = st.text_input("Enter TradingView Username/Email")
+password = st.text_input("Enter TradingView Password", type="password")
 
 if st.button("Login"):
     try:
@@ -31,6 +31,7 @@ if st.button("Run Analysis"):
     else:
         tv = st.session_state.tv
         summary = []
+        trade_logs = {}  # store per-stock trades
         today = datetime.today().strftime('%Y-%m-%d')
 
         def sanitize_filename(name):
@@ -39,6 +40,8 @@ if st.button("Run Analysis"):
         def evaluate_targets(df, entries):
             results = {"<=5_days": 0, "5_to_10_days": 0, "10_to_20_days": 0,
                        "20_to_30_days": 0, ">30_days": 0, "Never Hit": 0, "Overlapping": 0}
+            trades_list = []
+
             open_trade_pending = None
             for _, row in entries.iterrows():
                 entry_date = row['datetime']
@@ -47,13 +50,15 @@ if st.button("Run Analysis"):
                 future_data = df[df['datetime'] > entry_date]
                 hit_target = future_data[future_data['high'] >= target_price]
 
-                overlapping = open_trade_pending is not None and entry_date > open_trade_pending
-                if overlapping:
+                overlap_status = "No"
+                if open_trade_pending is not None and entry_date > open_trade_pending:
                     results["Overlapping"] += 1
+                    overlap_status = "Yes"
 
                 if not hit_target.empty:
                     first_hit_date = hit_target.iloc[0]['datetime']
                     holding_days = (first_hit_date - entry_date).days
+                    exit_hit_price = hit_target.iloc[0]['high']
                     if holding_days <= 5:
                         results["<=5_days"] += 1
                     elif holding_days <= 10:
@@ -64,11 +69,32 @@ if st.button("Run Analysis"):
                         results["20_to_30_days"] += 1
                     else:
                         results[">30_days"] += 1
+
+                    trades_list.append({
+                        "Entry Date": entry_date,
+                        "Entry Price": entry_close,
+                        "Exit Date": first_hit_date,
+                        "Exit Hit Price": exit_hit_price,
+                        "Outcome": "Target Hit",
+                        "Holding Days": holding_days,
+                        "Overlap Status": overlap_status
+                    })
+
                 else:
                     if open_trade_pending is None:
                         open_trade_pending = entry_date
                     results["Never Hit"] += 1
-            return results
+                    trades_list.append({
+                        "Entry Date": entry_date,
+                        "Entry Price": entry_close,
+                        "Exit Date": None,
+                        "Exit Hit Price": None,
+                        "Outcome": "Open Trade",
+                        "Holding Days": None,
+                        "Overlap Status": overlap_status
+                    })
+
+            return results, trades_list
 
         def calculate_weighted_score(results, total_trades):
             if total_trades == 0:
@@ -118,7 +144,7 @@ if st.button("Run Analysis"):
                 entries = df[(df['%K'] < 20) & (df['%D'] < 20) &
                              (df['RSI_2'] < 15) & (df['close'] > df['200DMA'])].copy()
                 total_trades = len(entries)
-                results = evaluate_targets(df, entries)
+                results, trades_list = evaluate_targets(df, entries)
 
                 def pct(x): return (x / total_trades * 100) if total_trades > 0 else 0
 
@@ -137,6 +163,8 @@ if st.button("Run Analysis"):
                     "Weighted Score": score
                 })
 
+                trade_logs[symbol] = (results, trades_list)
+
             except Exception as e:
                 st.error(f"Error fetching {symbol}: {e}")
             progress.progress(i / len(symbols))
@@ -144,18 +172,43 @@ if st.button("Run Analysis"):
         if summary:
             summary_df = pd.DataFrame(summary).sort_values(by="Weighted Score", ascending=False)
             st.success("✅ Analysis Complete")
+
+            # Add download buttons per stock
+            download_col = []
+            for idx, row in summary_df.iterrows():
+                stock = row["Stock"]
+                results, trades_list = trade_logs[stock]
+
+                # create Excel for this stock
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                    pd.DataFrame([row]).to_excel(writer, sheet_name="Summary", index=False)
+                    pd.DataFrame(trades_list).to_excel(writer, sheet_name="Trades", index=False)
+                buffer.seek(0)
+
+                btn = st.download_button(
+                    label=f"📥 {stock}",
+                    data=buffer,
+                    file_name=f"{stock}_trades_{today}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"download_{stock}"
+                )
+                download_col.append(btn)
+
+            # Display summary table without buttons
             st.dataframe(summary_df, use_container_width=True)
 
-            # ✅ Fix Excel export (BytesIO instead of direct to_excel)
+            # ✅ Fix Master Excel export
             buffer = BytesIO()
             with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                summary_df.to_excel(writer, index=False)
+                summary_df.to_excel(writer, index=False, sheet_name="All Stocks Summary")
             buffer.seek(0)
 
             st.download_button(
-                label="📥 Download Results as Excel",
+                label="📥 Download All Results as Excel",
                 data=buffer,
                 file_name=f"stock_summary_{today}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
 
