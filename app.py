@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import time
 import re
+import base64
 from datetime import datetime
 from tvDatafeed import TvDatafeed, Interval
 from io import BytesIO
@@ -33,9 +34,6 @@ if st.button("Run Analysis"):
         summary = []
         trade_logs = {}  # store per-stock trades
         today = datetime.today().strftime('%Y-%m-%d')
-
-        def sanitize_filename(name):
-            return re.sub(r'[^A-Za-z0-9_-]', '_', name)
 
         def evaluate_targets(df, entries):
             results = {"<=5_days": 0, "5_to_10_days": 0, "10_to_20_days": 0,
@@ -173,35 +171,31 @@ if st.button("Run Analysis"):
             summary_df = pd.DataFrame(summary).sort_values(by="Weighted Score", ascending=False)
             st.success("✅ Analysis Complete")
 
-            # Add download buttons per stock
-            download_col = []
+            # Add download links as a new column
+            download_links = []
             for idx, row in summary_df.iterrows():
                 stock = row["Stock"]
                 results, trades_list = trade_logs[stock]
 
-                # create Excel for this stock
                 buffer = BytesIO()
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                     pd.DataFrame([row]).to_excel(writer, sheet_name="Summary", index=False)
                     pd.DataFrame(trades_list).to_excel(writer, sheet_name="Trades", index=False)
                 buffer.seek(0)
 
-                btn = st.download_button(
-                    label=f"📥 {stock}",
-                    data=buffer,
-                    file_name=f"{stock}_trades_{today}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"download_{stock}"
-                )
-                download_col.append(btn)
+                b64 = base64.b64encode(buffer.read()).decode()
+                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{stock}_trades_{today}.xlsx">📥 Download</a>'
+                download_links.append(href)
 
-            # Display summary table without buttons
-            st.dataframe(summary_df, use_container_width=True)
+            summary_df["Download"] = download_links
 
-            # ✅ Fix Master Excel export
+            # Show table with clickable links
+            st.markdown(summary_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+
+            # ✅ Master Excel export
             buffer = BytesIO()
             with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                summary_df.to_excel(writer, index=False, sheet_name="All Stocks Summary")
+                summary_df.drop(columns=["Download"]).to_excel(writer, index=False, sheet_name="All Stocks Summary")
             buffer.seek(0)
 
             st.download_button(
@@ -210,5 +204,3 @@ if st.button("Run Analysis"):
                 file_name=f"stock_summary_{today}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
-
